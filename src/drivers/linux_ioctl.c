@@ -14,6 +14,8 @@
 #include "utils/common.h"
 #include "linux_ioctl.h"
 
+#define TIMEOUT_SEC		1
+#define IFACE_UP_RETRIES	5
 
 int linux_set_iface_flags(int sock, const char *ifname, int dev_up)
 {
@@ -66,12 +68,25 @@ int linux_iface_up(int sock, const char *ifname)
 	os_memset(&ifr, 0, sizeof(ifr));
 	os_strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
 
-	if (ioctl(sock, SIOCGIFFLAGS, &ifr) != 0) {
-		ret = errno ? -errno : -999;
-		wpa_printf(MSG_ERROR, "Could not read interface %s flags: %s",
-			   ifname, strerror(errno));
-		return ret;
+	/*Due to a desynchronization with the HAL there is a delay until the wlan interface
+	* is exposed. Will just retry here. Usually there is a delay of 2-3sec until wlan is exposed
+	*/
+	int i;
+
+	for(i=0; i <= IFACE_UP_RETRIES; i++){
+		ret = ioctl(sock, SIOCGIFFLAGS, &ifr);
+		if (ret != 0) {
+		    ret = errno ? -errno : -999;
+		    wpa_printf(MSG_ERROR, "Could not read interface %s flags: %s, tried %d",
+			    ifname, strerror(errno), i);
+		    sleep(TIMEOUT_SEC);
+		} else if (ret == 0) {
+		    wpa_printf(MSG_DEBUG, "Interface %s found\n", ifname);
+		    break;
+		}
 	}
+	if(ret < 0)
+	    return ret;
 
 	return !!(ifr.ifr_flags & IFF_UP);
 }
